@@ -1,0 +1,9 @@
+<launch>
+   <include file = "$(find socspioneer)/p2os_laser.launch" />
+   <node name = "map_server" pkg = "map_server" type = "map_server" args = "$(find nav)src/newlowerground.yaml"/>
+   <node name = "amcl" pkg = "amcl" type="amcl" >
+       <remap from = "scan" to = "base_scan" />
+   </node>
+   <node name = "rviz" pkg = "rviz" type = "rviz"/> 
+   <include file = "$(find nav)/src/move_base.launch" />
+</launch>

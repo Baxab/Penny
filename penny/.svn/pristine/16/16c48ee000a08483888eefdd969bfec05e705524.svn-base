@@ -1,0 +1,268 @@
+from geometry_msgs.msg import Pose, PoseArray, Quaternion
+from pf_base import PFLocaliserBase
+import math
+import rospy
+import numpy as np
+import scipy as sp
+from util import rotateQuaternion, getHeading
+import random
+from numpy import hstack, array, vstack
+from scipy.cluster.vq import kmeans, kmeans2, vq
+from scipy.cluster.hierarchy import linkage, fcluster
+import copy
+from time import time
+
+TAU = math.pi * 2
+
+class PFLocaliser(PFLocaliserBase):
+       
+    def __init__(self):
+        # Call the superclass constructor
+        super(PFLocaliser, self).__init__()
+        
+        # Set motion model parameters
+        self.ODOM_ROTATION_NOISE = 0.05#???? # Odometry model rotation noise
+        self.ODOM_TRANSLATION_NOISE = 0.05#???? # Odometry model x axis (forward) noise
+        self.ODOM_DRIFT_NOISE = 0.05#???? # Odometry model y axis (side-to-side) noise
+
+        # Sensor model parameters
+        self.NUMBER_PREDICTED_READINGS = 50 	# Number of readings to predict
+        
+        self.X_POSE_NOISE = 0.1
+        self.Y_POSE_NOISE = 0.1
+        self.A_POSE_NOISE = 0.1
+        
+       
+    def initialise_particle_cloud(self, initialpose):
+        # Set particle cloud to initialpose plus noise
+        poseArray = PoseArray()
+        for i in range(self.NUMBER_PREDICTED_READINGS):
+            thisPose = Pose()
+
+            xnoise = random.gauss(0, 1) * self.X_POSE_NOISE
+            ynoise = random.gauss(0, 1) * self.Y_POSE_NOISE
+            
+            thisPose.position.x = initialpose.pose.pose.position.x + xnoise
+            thisPose.position.y = initialpose.pose.pose.position.y + ynoise
+
+            rotationAngle = (random.vonmisesvariate(0, 3) * self.A_POSE_NOISE)
+            thisPose.orientation = rotateQuaternion(initialpose.pose.pose.orientation, rotationAngle)
+
+            poseArray.poses.append(thisPose);
+        return poseArray
+ 
+    
+    def update_particle_cloud(self, scan):
+        # Update particlecloud, given map and laser scan
+        self.latest_scan = scan
+        poseArray = PoseArray()
+
+        weights = []
+        totalWeight = 0
+        for pose in self.particlecloud.poses:
+            thisWeight = self.sensor_model.get_weight(scan, pose)
+            weights.append(thisWeight)
+            totalWeight += thisWeight
+#
+#        for i in range(self.NUMBER_PREDICTED_READINGS):
+#            runningWeight = 0
+#            cutoff = random.uniform(0, totalWeight)
+#            for i, thisPose in enumerate(self.particlecloud.poses):
+#                runningWeight += weights[i]
+#                if runningWeight > cutoff:
+#                    break
+#            #print "appending: " + str(self.sensor_model.get_weight(scan, thisPose))
+#            poseArray.poses.append(copy.deepcopy(thisPose))
+
+        for num, i in enumerate(range(self.NUMBER_PREDICTED_READINGS)):
+            value = random.random() * totalWeight
+            
+            for j, pose in enumerate(self.particlecloud.poses):
+                value -= weights[j]
+                if value <= 0:
+                    break
+            poseArray.poses.append(copy.deepcopy(pose))
+
+        for i, thisPose in enumerate(poseArray.poses):
+            xnoise = random.gauss(0, 1) * self.X_POSE_NOISE
+            ynoise = random.gauss(0, 1) * self.Y_POSE_NOISE
+
+            #print "x: " + str(poseArray.poses[i].position.x) + "xnoise: " + str(xnoise)
+            #print "y: " + str(poseArray.poses[i].position.y) + "ynoise: " + str(ynoise)
+
+            poseArray.poses[i].position.x += xnoise
+            poseArray.poses[i].position.y += ynoise
+
+            #print "x: " + str(poseArray.poses[i].position.x)
+            #print "y: " + str(poseArray.poses[i].position.y)
+
+            rotationAngle = ((random.vonmisesvariate(0, 5) - math.pi) * self.A_POSE_NOISE)
+            print "vonmisesValue: " + str((rotationAngle/self.A_POSE_NOISE))
+            rotationAngle = rotationAngle % (TAU)
+            poseArray.poses[i].orientation = rotateQuaternion(poseArray.poses[i].orientation, rotationAngle)
+
+        #print "after: "
+        #for i, pose in enumerate(poseArray.poses):
+        #    print str(pose.position.x) + "," + str(pose.position.y) + " weight: " + str(self.sensor_model.get_weight(scan, pose))
+
+        self.particlecloud = poseArray 
+        
+
+    def estimate_pose(self):
+        # Create new estimated pose, given particle cloud
+        # E.g. just average the location and orientation values of each of
+        # the particles and return this.
+
+        # Better approximations could be made by doing some simple clustering,
+        # e.g. taking the average location of half the particles after 
+        
+        # throwing away any which are outliers
+
+##############################################################################
+#                                HAC CLUSTERING                              #
+##############################################################################
+#        px = []
+#        py = []
+#        oz = []
+#        ow = []
+#        max_d = 100
+#        
+#        for particle in self.particlecloud.poses:
+#            px.append(particle.position.x)
+#            py.append(particle.position.y)
+#            oz.append(particle.orientation.z)
+#            ow.append(particle.orientation.w)
+#
+#        posx = array(px)
+#        posy = array(py)
+#        orz = array(oz)
+#        orw = array(ow)
+#        x = vstack((posx, posy, orz, orw))
+#        
+#        z = linkage(x, 'ward')
+#        clustered = fcluster(z, max_d, criterion ='distance')
+#        
+#        clusters = []
+#        numclusterelements = [] 
+#        weightcluster = []
+#        i = 0
+#        for clusterid in clustered:
+#            particle = self.particlecloud.poses[i]
+#            weight = self.sensor_model.get_weight(self.latest_scan, particle)
+#             
+#            if clusterid not in clusters:
+#                clusters.append(clusterid)
+#                numclusterelements.insert(clusterid-1,1)
+#                weightcluster.insert(clusterid-1,weight)
+#
+#            else:
+#                print "CLUSTER ID: " + str(clusterid)
+#                print "LEN numclusterelemnts: " + str(len(numclusterelements))
+#             	numclusterelements[clusterid-1]+=1
+#             	weightcluster[clusterid-1] += weight
+#            i +=1
+#             
+#        for j in range(len(clusters)):
+#            weightcluster[j]= weightcluster[j]/numclusterelements[j]
+#
+#        reqclusterid = weightcluster.index(max(weightcluster)) +1
+#        numelementsreq = numclusterelements[reqclusterid-1]
+#        
+#        k = 0
+#        x_sum = 0
+#        y_sum = 0
+#        qz_sum = 0
+#        qw_sum = 0
+#        for clusterid in clustered:
+#            particle = self.particlecloud.poses[k]
+#            if (clusterid == reqclusterid):
+#                x_sum += particle.position.x
+#                y_sum += particle.position.y
+#                qz_sum += particle.orientation.z
+#                qw_sum += particle.orientation.w
+#		 
+#        estpose = Pose()	 
+#        estpose.position.x = x_sum /numelementsreq
+#        estpose.position.y = y_sum/numelementsreq
+#        estpose.orientation.z = qz_sum/numelementsreq
+#        estpose.orientation.w = qw_sum/numelementsreq
+#
+#        return estpose
+
+##############################################################################
+#                                  GLOBAL MEAN                               #
+##############################################################################
+        estpose = Pose()
+        x_sum = 0
+        y_sum = 0
+        qx_sum = 0
+        qy_sum = 0
+        qz_sum = 0
+        qw_sum = 0
+        for num, i in enumerate(self.particlecloud.poses):
+            x_sum += i.position.x
+            y_sum += i.position.y
+            qz_sum += i.orientation.z
+            qw_sum += i.orientation.w
+
+        estpose.position.x = x_sum / self.NUMBER_PREDICTED_READINGS
+        estpose.position.y = y_sum / self.NUMBER_PREDICTED_READINGS
+        estpose.orientation.z = qz_sum / self.NUMBER_PREDICTED_READINGS
+        estpose.orientation.w = qw_sum / self.NUMBER_PREDICTED_READINGS
+        
+        return estpose
+
+##############################################################################
+#                                KMEANS CLUSTERING                           #
+##############################################################################
+#        k = int(math.sqrt(self.NUMBER_PREDICTED_READINGS/2))
+#        pos_x = [[] for _ in range(len(self.particle_cloud.poses))]
+#        pos_y = [[] for _ in range(len(self.particle_cloud.poses))]
+#
+#        for i in range(len(self.particle_cloud.poses)):
+#            pos_x[i].append(self.particle_cloud.poses[i].position.x)
+#            pos_y[i].append(self.particle_cloud.poses[i].position.y)
+#
+#        f_x = np.array(pos_x)
+#        f_y = np.array(pos_y)	
+#        print(f_x)
+#        print(f_y)
+#        data = hstack((f_x, f_y))
+#        print(data)
+#        
+#        # computing K-mean, returning an array of centroids and the labels
+#        centroids, labels = kmeans2(data, k, minit='points')
+#
+#        count = []
+#        for i in range(k):
+#            count.append(0)
+#        for i,_ in enumerate(self.particle_cloud.poses):
+#            index = labels[i]
+#            count[index] += 1
+#
+#        centroidWithMaxPoses = count.index(max(count))
+#
+#        orient = []      
+#        for i,_ in enumerate(self.particlecloud.poses):
+#            if labels[i] == centroidWithMaxPoses
+#                teta = self.getHeading(self.particlecloude.poses[i].orientation)
+#                teta += math.pi
+#                orient.append(teta)
+#        orientCount = []
+#        for i in range(40):
+#            orientCount.append(0)
+#        for i in range(len(orient))
+#            for j in xrange(0, 2*(math.pi), (math.pi)/40)
+#                if orient[i] in range(j, j+(math.pi)/40)
+#                    orientCount[j] += 1
+#        indexEstimatedOrient = count.index(max(orientCount))
+#        valueEstimatedOrient = (indexEstimatedOrient*(math.pi)/40 + (math.pi)/80) - math.pi
+#
+#        estimatedPose = Pose()
+#        estimatedPose.position.x = centroids[centroidWithMaxPoses][0]
+#        estimatedPose.position.y = centroids[centroidWithMaxPoses][1]
+#        estimatedPose.orientation = rotateQuaternion(estimatedPose.orientation, -getHeading(estimatedPose.orientation))
+#        estimatedPose.orientation = rotateQuaternion(estimatedPose.orientation, valueEstimatedOrient)
+#
+#        return estimatedPose
+

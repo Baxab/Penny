@@ -1,0 +1,81 @@
+from geometry_msgs.msg import PoseWithCovarianceStamped, PoseArray, Quaternion
+from pf_base import PFLocaliserBase
+import math
+import rospy
+import numpy as np
+from util import rotateQuaternion, getHeading
+import random
+
+from time import time
+NUM_PARTICLES = 10
+
+class PFLocaliser(PFLocaliserBase):
+       
+    def __init__(self):
+        # Call the superclass constructor
+        super(PFLocaliser, self).__init__()
+        
+        # Set motion model parameters
+        self.ODOM_ROTATION_NOISE = 1#???? # Odometry model rotation noise
+        self.ODOM_TRANSLATION_NOISE = 1#???? # Odometry model x axis (forward) noise
+        self.ODOM_DRIFT_NOISE = 1#???? # Odometry model y axis (side-to-side) noise
+
+        # Sensor model parameters
+        self.NUMBER_PREDICTED_READINGS = 20 	# Number of readings to predict
+        
+       
+    def initialise_particle_cloud(self, initialpose):
+        # Set particle cloud to initialpose plus noise
+        poseArray = PoseArray()
+        for i in range(NUM_PARTICLES):
+            thisPose = PoseWithCovarianceStamped()
+            thisPose.pose.pose.position.x = initialpose.pose.pose.position.x + (random.gauss(0, 0.5) * self.ODOM_TRANSLATION_NOISE)
+            thisPose.pose.pose.position.y = initialpose.pose.pose.position.y + (random.gauss(0, 0.5) * self.ODOM_DRIFT_NOISE)
+
+            rotationAngle = getHeading(initialpose.pose.pose.orientation) + (random.vonmisesvariate(0, 1) * self.ODOM_ROTATION_NOISE)
+            thisPose.pose.pose.orientation = rotateQuaternion(initialpose.pose.pose.orientation, rotationAngle)
+
+            poseArray.poses.append(thisPose.pose.pose);
+        return poseArray
+ 
+    
+    def update_particle_cloud(self, scan):
+        # Update particlecloud, given map and laser scan
+        poseArray = PoseArray()       
+        
+        for i in range(NUM_PARTICLES):
+            totalWeight = 0
+            for pose in self.particlecloud.poses:
+                totalWeight += self.sensor_model.get_weight(scan, pose)
+                
+            value = random.random() * totalWeight;	
+            
+            for pose in self.particlecloud.poses:
+                value -= self.sensor_model.get_weight(scan, pose)
+                if value <= 0:
+                    break
+            poseArray.poses.append(pose)
+
+        # Add some noise to all the particles
+        for thisPose in poseArray.poses:
+            thisPose.position.x += (random.gauss(0, 0.1) * self.ODOM_TRANSLATION_NOISE)
+            thisPose.position.y += (random.gauss(0, 0.1) * self.ODOM_DRIFT_NOISE)
+
+            rotationAngle = getHeading(thisPose.orientation) + (random.vonmisesvariate(0, 1) * self.ODOM_ROTATION_NOISE)
+            rotationAngle = rotationAngle % (2 * math.pi)
+            thisPose.orientation = rotateQuaternion(thisPose.orientation, rotationAngle)
+
+        self.particle_cloud = poseArray 
+        
+
+    def estimate_pose(self):
+        # Create new estimated pose, given particle cloud
+        # E.g. just average the location and orientation values of each of
+        # the particles and return this.
+        
+        # Better approximations could be made by doing some simple clustering,
+        # e.g. taking the average location of half the particles after 
+        
+        # throwing away any which are outliers
+        return self.particle_cloud.poses[0]
+

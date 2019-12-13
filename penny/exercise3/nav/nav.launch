@@ -1,0 +1,5 @@
+<launch>
+   <node name = "map_navigation" pkg = "nav" type = "navigation_node.py" /> 
+   <node name = "controller" pkg = "nav" type = "state_machine_controller.py" /> 
+   <node name = "rostopic" pkg ="rostopic" type = "rostopic" args = "pub /state_machine std_msgs/String state_navigation"/>
+</launch>

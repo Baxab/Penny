@@ -1,0 +1,11 @@
+<launch>
+  <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
+    <rosparam file="$(find nav)src/costmap_common_params_penny.yaml" command="load" ns="global_costmap" />
+    <rosparam file="$(find nav)src/costmap_common_params_penny.yaml" command="load" ns="local_costmap" />
+    <rosparam file="$(find nav)src/local_costmap_params_penny.yaml" command="load" />
+    <rosparam file="$(find nav)src/global_costmap_params_penny.yaml" command="load" />
+    <rosparam file="$(find nav)src/base_local_planner_params_penny.yaml" command="load" />
+#CHANGE
+    <param name="controller_frequency" value="10.0"/>
+  </node>
+</launch>

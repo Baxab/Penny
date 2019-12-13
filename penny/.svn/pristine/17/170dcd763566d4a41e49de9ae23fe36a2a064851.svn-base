@@ -1,0 +1,87 @@
+#! /usr/bin/env python
+
+import rospy
+from std_msgs.msg import String
+
+
+current_state = 1
+
+def state_sound_alarm(self, change_state_data):
+    return 0
+         
+def state_navigation(self, change_state_data):
+    if True:
+        return 1
+    else:
+        return 2
+    
+def state_wait(self, change_state_data):
+    return 1
+    
+def state_follower(self, change_state_data):
+    if True:
+        return 3
+    else:
+        return 0
+
+def state_face_detection(self, change_state_data):
+    if True:
+        return 5
+    else:
+        return 7
+
+def state_face_recognition(self, change_state_data):
+    if True:
+        return 7
+    else:
+        return 6
+
+def state_face_training(self, change_state_data):
+    if True:
+        return 7
+    
+def state_card_recognition(self, change_state_data):
+    if True:
+        return 6
+    else:
+        return 0
+
+# map the inputs to the function blocks
+states = {
+            0 : state_sound_alarm,
+            1 : state_navigation,
+            2 : state_follower,
+            3 : state_face_detection,
+            4 : state_face_recognition,
+            5 : state_face_training,
+            6 : state_card_recognition,
+            7 : state_wait,
+}
+
+# In charge of deciding new state and publishing the update
+def callback(change_state_data):
+	rospy.loginfo(change_state_data)
+	
+    current_state = states[current_state](change_state_data)    # decides next state
+        
+    pub.publish(states[current_state])
+	
+
+if __name__ == '__main__':
+    rospy.init_node('controller')
+
+    rospy.Subscriber('state_sound_alarm', Bool, callback)
+    rospy.Subscriber('state_navigation', Bool, callback)
+    rospy.Subscriber('state_wait', Bool, callback)
+    rospy.Subscriber('state_follower', Bool, callback)
+    rospy.Subscriber('state_face_detection', Bool, callback)
+    rospy.Subscriber('state_face_recognition', Bool, callback)
+    rospy.Subscriber('state_face_training', Bool, callback)
+    rospy.Subscriber('state_card_recognition', Bool, callback)
+
+    pub = rospy.Publisher('state_machine', String, queue_size=10)
+    
+    rospy.spin()
+    
+    
+    
